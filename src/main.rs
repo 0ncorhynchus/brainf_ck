@@ -121,11 +121,7 @@ where I: Iterator<Item=Command>
 {
     let mut count = 0;
     loop {
-        if let Some(next) = iter.peek() {
-            if next != &target {
-                break;
-            }
-        } else {
+        if iter.peek() != Some(&target) {
             break;
         }
         count += 1;
@@ -139,14 +135,14 @@ fn pass(commands: Vec<Command>) -> Vec<Operand> {
     let mut iter = commands.into_iter().peekable();
     while let Some(command) = iter.next() {
         operands.push(match command {
-            Command::Next => Operand::Next(1 + count_command(&mut iter, Command::Next)),
-            Command::Prev => Operand::Prev(1 + count_command(&mut iter, Command::Prev)),
+            Command::Next      => Operand::Next(1 + count_command(&mut iter, Command::Next)),
+            Command::Prev      => Operand::Prev(1 + count_command(&mut iter, Command::Prev)),
             Command::Increment => Operand::Increment(1 + count_command(&mut iter, Command::Increment) as u8),
             Command::Decrement => Operand::Decrement(1 + count_command(&mut iter, Command::Decrement) as u8),
-            Command::Print => Operand::Print,
-            Command::Read => Operand::Read,
+            Command::Print     => Operand::Print,
+            Command::Read      => Operand::Read,
             Command::LoopBegin => Operand::LoopBegin,
-            Command::LoopEnd => Operand::LoopEnd,
+            Command::LoopEnd   => Operand::LoopEnd,
         })
     }
     operands
