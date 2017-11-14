@@ -1,10 +1,14 @@
+#![feature(test)]
+extern crate test;
+
+use std::iter::Peekable;
 use std::io::{self, Read};
 
 enum Operand {
-    Next,
-    Prev,
-    Increment,
-    Decrement,
+    Next(usize),
+    Prev(usize),
+    Increment(u8),
+    Decrement(u8),
     Print,
     Read,
     LoopBegin,
@@ -45,10 +49,10 @@ impl Machine {
     fn run(&mut self) {
         while self.is_finished() {
             match self.get_operand() {
-                &Operand::Next => self.pointer += 1,
-                &Operand::Prev => self.pointer -= 1,
-                &Operand::Increment => self.memory[self.pointer] += 1,
-                &Operand::Decrement => self.memory[self.pointer] -= 1,
+                &Operand::Next(n) => self.pointer += n,
+                &Operand::Prev(n) => self.pointer -= n,
+                &Operand::Increment(n) => self.memory[self.pointer] += n,
+                &Operand::Decrement(n) => self.memory[self.pointer] -= n,
                 &Operand::Print => print!("{}", char::from(self.get_value())),
                 &Operand::Read => {
                     let stdin = io::stdin();
@@ -84,28 +88,87 @@ impl Machine {
     }
 }
 
-fn char2operand(c: char) -> Option<Operand> {
-    match c {
-        '>' => Some(Operand::Next),
-        '<' => Some(Operand::Prev),
-        '+' => Some(Operand::Increment),
-        '-' => Some(Operand::Decrement),
-        '.' => Some(Operand::Print),
-        ',' => Some(Operand::Read),
-        '[' => Some(Operand::LoopBegin),
-        ']' => Some(Operand::LoopEnd),
-        _ => None
-    }
+#[derive(PartialEq)]
+enum Command {
+    Next,
+    Prev,
+    Increment,
+    Decrement,
+    Print,
+    Read,
+    LoopBegin,
+    LoopEnd,
 }
 
-fn parse(commands: &String) -> Vec<Operand> {
+fn parse(commands: &String) -> Vec<Command> {
     commands.chars()
-            .filter_map(|c| char2operand(c))
+            .filter_map(|c| match c {
+                '>' => Some(Command::Next),
+                '<' => Some(Command::Prev),
+                '+' => Some(Command::Increment),
+                '-' => Some(Command::Decrement),
+                '.' => Some(Command::Print),
+                ',' => Some(Command::Read),
+                '[' => Some(Command::LoopBegin),
+                ']' => Some(Command::LoopEnd),
+                _ => None
+            })
             .collect()
+}
+
+fn count_command<I>(iter: &mut Peekable<I>, target: Command) -> usize
+where I: Iterator<Item=Command>
+{
+    let mut count = 0;
+    loop {
+        if let Some(next) = iter.peek() {
+            if next != &target {
+                break;
+            }
+        } else {
+            break;
+        }
+        count += 1;
+        iter.next();
+    }
+    count
+}
+
+fn pass(commands: Vec<Command>) -> Vec<Operand> {
+    let mut operands = Vec::new();
+    let mut iter = commands.into_iter().peekable();
+    while let Some(command) = iter.next() {
+        operands.push(match command {
+            Command::Next => Operand::Next(1 + count_command(&mut iter, Command::Next)),
+            Command::Prev => Operand::Prev(1 + count_command(&mut iter, Command::Prev)),
+            Command::Increment => Operand::Increment(1 + count_command(&mut iter, Command::Increment) as u8),
+            Command::Decrement => Operand::Decrement(1 + count_command(&mut iter, Command::Decrement) as u8),
+            Command::Print => Operand::Print,
+            Command::Read => Operand::Read,
+            Command::LoopBegin => Operand::LoopBegin,
+            Command::LoopEnd => Operand::LoopEnd,
+        })
+    }
+    operands
 }
 
 fn main() {
     let commands = String::from("++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.");
-    let mut machine = Machine::new(parse(&commands));
+    let mut machine = Machine::new(pass(parse(&commands)));
     machine.run();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test::Bencher;
+
+    #[bench]
+    fn bench_hello_world(b: &mut Bencher) {
+        let commands = String::from("++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.");
+        b.iter(|| {
+            let mut machine = Machine::new(pass(parse(&commands)));
+            machine.run();
+        })
+    }
 }
