@@ -11,26 +11,21 @@ enum Operand {
     Decrement(u8),
     Print,
     Read,
-    LoopBegin,
-    LoopEnd,
+    Loop(Vec<Operand>),
 }
 
 struct Machine {
     pointer: usize,
     memory: Vec<u8>,
-    operands: Vec<Operand>,
-    operand_index: usize,
 }
 
 impl Machine {
     const INITIAL_SIZE: usize = 300000;
 
-    fn new(operands: Vec<Operand>) -> Self {
+    fn new() -> Self {
         Machine {
             pointer: 0,
             memory: vec![0; Machine::INITIAL_SIZE],
-            operands: operands,
-            operand_index: 0,
         }
     }
 
@@ -38,52 +33,31 @@ impl Machine {
         self.memory[self.pointer]
     }
 
-    fn get_operand(&self) -> &Operand {
-        &self.operands[self.operand_index]
+    fn exec(&mut self, operand: &Operand) {
+        match operand {
+            &Operand::Next(n) => self.pointer += n,
+            &Operand::Prev(n) => self.pointer -= n,
+            &Operand::Increment(n) => self.memory[self.pointer] += n,
+            &Operand::Decrement(n) => self.memory[self.pointer] -= n,
+            &Operand::Print => print!("{}", char::from(self.get_value())),
+            &Operand::Read => {
+                let stdin = io::stdin();
+                let mut handle = stdin.lock();
+                handle.read(&mut self.memory[self.pointer..self.pointer+1]).unwrap();
+            },
+            &Operand::Loop(ref operands) => {
+                while self.get_value() != 0 {
+                    for op in operands.iter() {
+                        self.exec(op);
+                    }
+                }
+            },
+        }
     }
 
-    fn is_finished(&self) -> bool {
-        self.operand_index < self.operands.len()
-    }
-
-    fn run(&mut self) {
-        while self.is_finished() {
-            match self.get_operand() {
-                &Operand::Next(n) => self.pointer += n,
-                &Operand::Prev(n) => self.pointer -= n,
-                &Operand::Increment(n) => self.memory[self.pointer] += n,
-                &Operand::Decrement(n) => self.memory[self.pointer] -= n,
-                &Operand::Print => print!("{}", char::from(self.get_value())),
-                &Operand::Read => {
-                    let stdin = io::stdin();
-                    let mut handle = stdin.lock();
-                    handle.read(&mut self.memory[self.pointer..self.pointer+1]).unwrap();
-                },
-                &Operand::LoopBegin => {
-                    if self.get_value() == 0 {
-                        loop {
-                            match self.get_operand() {
-                                &Operand::LoopEnd => break,
-                                _ => self.operand_index += 1,
-                            }
-                        }
-                    }
-                },
-                &Operand::LoopEnd => {
-                    if self.get_value() != 0 {
-                        let mut num_inner_loops = 1;
-                        while num_inner_loops != 0 {
-                            self.operand_index -= 1;
-                            match self.get_operand() {
-                                &Operand::LoopBegin => num_inner_loops -= 1,
-                                &Operand::LoopEnd => num_inner_loops += 1,
-                                _ => {}
-                            }
-                        }
-                    }
-                },
-            }
-            self.operand_index += 1;
+    fn run(&mut self, operands: &Vec<Operand>) {
+        for operand in operands {
+            self.exec(operand);
         }
     }
 }
@@ -130,28 +104,35 @@ where I: Iterator<Item=Command>
     count
 }
 
-fn pass(commands: Vec<Command>) -> Vec<Operand> {
+fn pass<I>(input: &mut Peekable<I>, depth: usize) -> Vec<Operand>
+where I: Iterator<Item=Command>
+{
     let mut operands = Vec::new();
-    let mut iter = commands.into_iter().peekable();
-    while let Some(command) = iter.next() {
+    while let Some(command) = input.next() {
         operands.push(match command {
-            Command::Next      => Operand::Next(1 + count_command(&mut iter, Command::Next)),
-            Command::Prev      => Operand::Prev(1 + count_command(&mut iter, Command::Prev)),
-            Command::Increment => Operand::Increment(1 + count_command(&mut iter, Command::Increment) as u8),
-            Command::Decrement => Operand::Decrement(1 + count_command(&mut iter, Command::Decrement) as u8),
+            Command::Next      => Operand::Next(1 + count_command(input, Command::Next)),
+            Command::Prev      => Operand::Prev(1 + count_command(input, Command::Prev)),
+            Command::Increment => Operand::Increment(1 + count_command(input, Command::Increment) as u8),
+            Command::Decrement => Operand::Decrement(1 + count_command(input, Command::Decrement) as u8),
             Command::Print     => Operand::Print,
             Command::Read      => Operand::Read,
-            Command::LoopBegin => Operand::LoopBegin,
-            Command::LoopEnd   => Operand::LoopEnd,
+            Command::LoopBegin => Operand::Loop(pass(input, depth+1)),
+            Command::LoopEnd   => { break; },
         })
     }
     operands
 }
 
+fn compile(commands: Vec<Command>) -> Vec<Operand> {
+    let mut iter = commands.into_iter().peekable();
+    pass(&mut iter, 0)
+}
+
 fn main() {
     let commands = String::from("++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.");
-    let mut machine = Machine::new(pass(parse(&commands)));
-    machine.run();
+    let operands = compile(parse(&commands));
+    let mut machine = Machine::new();
+    machine.run(&operands);
 }
 
 #[cfg(test)]
@@ -162,9 +143,10 @@ mod tests {
     #[bench]
     fn bench_hello_world(b: &mut Bencher) {
         let commands = String::from("++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.");
+        let operands = compile(parse(&commands));
         b.iter(|| {
-            let mut machine = Machine::new(pass(parse(&commands)));
-            machine.run();
+            let mut machine = Machine::new();
+            machine.run(&operands);
         })
     }
 }
